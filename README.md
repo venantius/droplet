@@ -14,7 +14,8 @@ Figuring out C&F's proposed ideal size (and error) of the Rs data structure (the
 
 2s is easy as s is our primary paramater, but what to make of δr? In the proof for Lemma 2.1, C&F claim that 
     
-    Setting s = 12log(1/δt) we ensure that we can recover at this level j with high probability (and possibly also recover at higher levels j as well).
+    Setting s = 12log(1/δt) we ensure that we can recover at this level j with high 
+    probability (and possibly also recover at higher levels j as well).
 
 Solving for the above, we see that δt = 2 ^ -(s/12). 
 

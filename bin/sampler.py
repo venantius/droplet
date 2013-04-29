@@ -9,7 +9,9 @@ Creation date: 2013-03-27
 
 import math
 import mmh3
+from operator import attrgetter
 import random
+import sys
 
 class OneSparseRecoveryEstimator():
     """
@@ -21,6 +23,17 @@ class OneSparseRecoveryEstimator():
         self.phi = 0
         self.iota = 0
         self.tau = 0
+
+    def __eq__(self, other):
+        if (self.phi == other.phi and \
+            self.iota == other.iota and \
+            self.tau == other.tau):
+            return True
+        else:
+            return False
+
+    def __hash__(self):
+        return hash((self.phi, self.iota, self.tau))
 
     def __repr__(self):
         return str((self.phi, self.is_one_sparse_ganguly()))
@@ -59,34 +72,54 @@ class OneSparseRecoveryEstimator():
         """
         Advanced check to see if P1 is one-sparse (using large primes)
         """
+        #TODO
         pass
 
 class SSparseRecoveryEstimator(object):
     """
     An s-sparse recovery estimator comprised of an array of 1-sparse estimators
     """
-    def __init__(self, sparsity, k):
-        self.sparsity = sparsity
-        self.k = k
+    def __init__(self, ncols, nrows):
+        self.ncols = ncols
+        self.nrows = nrows
         self.array = [[OneSparseRecoveryEstimator() for _s 
-            in range(self.sparsity)] for _ in range(k)]
+            in range(self.ncols)] for _ in range(self.nrows)]
 
     def __repr__(self):
         return '\n'.join([str(x) for x in self.array])
+
+    def is_s_sparse(self):
+        """
+        Check to see if this level is s-sparse
+        """
+        sparsity = 0
+        size = self.ncols * self.nrows
+        for row in self.array:
+            sparsity += [item.phi for item in row].count(0)
+        if sparsity >= (self.ncols / 2) and sparsity != size:
+            return True
+        else:
+            return False
 
     def update(self, i, value):
         """
         Update the s-sparse recovery estimator at each hash function
         """
-        for row in range(self.k):
-            col = mmh3.hash(str(i), seed=row) % self.sparsity
+        for row in range(self.nrows):
+            col = mmh3.hash(str(i), seed=row) % self.ncols
             self.array[row][col].update(i, value)
 
     def recover(self, i):
         """
         Attempt to recover a nonzero vector from this level
         """
-        #TODO
+        a_prime = set()
+        for row in range(self.nrows):
+            for col in range(self.ncols):
+                if self.array[row][col].phi != 0 and \
+                    self.array[row][col].is_one_sparse_ganguly():
+                    a_prime.add(self.array[row][col])
+        return a_prime
 
 class L0Sampler(object):
     """
@@ -114,13 +147,11 @@ class L0Sampler(object):
         if not k:
             delta = 2 ** (-sparsity/ 12)
             k = int(round(math.log(sparsity/delta, 2)))
-        #TODO: Set k >= s/2; or log(s/delta)?
-        # Need to solve for the above to figure out what k should be set as in the context of s; delta is set by s and k can be set by s and delta, so...
         self.size = size
-        self.sparsity = 2 * sparsity
+        self.sparsity = sparsity
         self.k = k
         levels = int(round(math.log(size, 2)))
-        self.levels = [SSparseRecoveryEstimator(self.sparsity, k) 
+        self.levels = [SSparseRecoveryEstimator(self.sparsity * 2, k) 
                 for _ in range(levels)]
 
     def __repr__(self):
@@ -131,19 +162,6 @@ class L0Sampler(object):
 
         return '\n\n'.join(return_str)
 
-    def update(self, i, value):
-        """
-        Update the L0 sampler
-        """
-        if not (i > 0 and i <= self.size):
-            raise Exception, "Update value %s outside of size %s" % (i, self.size)
-        for j, level in enumerate(self.levels):
-            #print "hash modulo: %s" %  (mmh3.hash(str(i)) % self.size + 1)
-            #print "size 2^-j: %s" % (self.size * (2 ** -(j + 1)))
-            if self.size * (2 ** -(j + 1)) >= \
-                (mmh3.hash(str(i)) % self.size) + 1:
-                level.update(i, value)
-
     def recover(self, i=None):
         """
         Attempt to recover a nonzero vector from one of the L0 Sampler's levels.
@@ -151,29 +169,46 @@ class L0Sampler(object):
         if not i:
             i = random.randint(0, self.size-1)
         for j, level in enumerate(self.levels):
-            vector = level.recover(i)
-            if vector:
+            if level.is_s_sparse():
+                #print >> sys.stderr, "Identified level %s as s-sparse; recovering..." % j
+                vector = level.recover(i)
+                if vector:
+                    break
+                else: 
+                    #print >> sys.stderr, "Failed to recover at level %s, trying level %s" % (j, j+1)
+                    continue
+        #print "\n\n" + str(self) + "\n\n"
+        if vector:
+            selection = self.select(vector)
+            return selection
+        else:
+            return None
+
+    def sample(self):
+        sample = []
+        while True:
+            selection = self.recover()
+            if not selection:
                 break
-        return vector
+            sample.append(selection)
+            self.update(selection[0], -selection[1])
+            #print "RECOVERED: %s" % str(selection)
+        return sample
 
-#heyo = L0Sampler(2**64, 3)
-#print len(heyo.levels)
+    def select(self, vector):
+        #print "A'(j): %s" % vector
+        indexes = sorted(vector, key=lambda x: mmh3.hash(str(x.iota / x.phi)))
+        item = indexes[0]
+        i = item.iota / item.phi
+        return (i, item.phi)
 
-#print "INITIALIZING L0 SAMPLER"
-simple_sampler = L0Sampler(20, 3)
-#print simple_sampler
-
-print "\nTESTING UPDATE FUNCTION\n"
-simple_sampler.update(2, 1)
-simple_sampler.update(3, 3)
-simple_sampler.update(4, 5)
-simple_sampler.update(5, 7)
-#simple_sampler.update(6, 20)
-#simple_sampler.update(7, 45)
-#simple_sampler.update(8, 100)
-#simple_sampler.update(9, 200)
-#simple_sampler.update(10, 500)
-
-simple_sampler.recover(10)
-print simple_sampler
-
+    def update(self, i, value):
+        """
+        Update the L0 sampler
+        """
+        if not (i > 0 and i <= self.size):
+            raise Exception, "Update value %s outside size %s" % (i, self.size)
+        for j, level in enumerate(self.levels):
+            if self.size * (2 ** -(j + 1)) >= \
+                (mmh3.hash(str(i)) % self.size) + 1:
+                level.update(i, value)
