@@ -2,16 +2,17 @@
 # encoding: utf-8
 
 """
-This is a prototype for an L0 sampler. 
+Samplers.py
 
-Creation date: 2013-03-27
+Data structures for the dynamic sampling of massive streams of data:
+    - L0-Sampler
+    - Distinct Sampler
 """
 
 import math
-import mmh3
-from operator import attrgetter
 import random
-import sys
+
+from droplet.hash_functions import murmurhash3_32
 
 class OneSparseRecoveryEstimator():
     """
@@ -57,11 +58,11 @@ class OneSparseRecoveryEstimator():
 
     def is_one_sparse_ganguly(self):
         """
-        Slightly more advanced check to see if P1 is one-sparse.
+        A slightly more advanced check to see if P1 is one-sparse.
 
-        Because AK's frequency updates are assumed to be non-negative (and
-        always equal to 1) this is sufficient. If we expected negative updates,
-        however, we would need to use F&C's prime-based one-sparse checker
+        In cases where updates are assumed to be non-negative, this is 
+        sufficient. In cases requiring negative updates, use 
+        is_one_sparse_prime() instead.
         """
         if self.phi * self.tau == (self.iota ** 2):
             return True
@@ -70,7 +71,9 @@ class OneSparseRecoveryEstimator():
 
     def is_one_sparse_prime(self, index):
         """
-        Advanced check to see if P1 is one-sparse (using large primes)
+        An advanced check to see if P1 is one-sparse (using large primes).
+
+        May register a false negative; see the wiki for more details.
         """
         #TODO
         pass
@@ -79,11 +82,13 @@ class SSparseRecoveryEstimator(object):
     """
     An s-sparse recovery estimator comprised of an array of 1-sparse estimators
     """
-    def __init__(self, ncols, nrows):
+    def __init__(self, ncols, nrows, hash_function):
         self.ncols = ncols
         self.nrows = nrows
         self.array = [[OneSparseRecoveryEstimator() for _s 
             in range(self.ncols)] for _ in range(self.nrows)]
+        
+        self.hash_function = hash_function
 
     def __repr__(self):
         return '\n'.join([str(x) for x in self.array])
@@ -106,7 +111,7 @@ class SSparseRecoveryEstimator(object):
         Update the s-sparse recovery estimator at each hash function
         """
         for row in range(self.nrows):
-            col = mmh3.hash(str(i), seed=row) % self.ncols
+            col = self.hash_function(str(i), seed=row) % self.ncols
             self.array[row][col].update(i, value)
 
     def recover(self, i):
@@ -121,12 +126,14 @@ class SSparseRecoveryEstimator(object):
                     a_prime.add(self.array[row][col])
         return a_prime
 
-class L0Sampler(object):
+class L0(object):
     """
-    A naive implementation of Cormode and Firmani's L0-Sampling data structure
+    A naive implementation of an L0-Sampling data structure, as described in 
+    Cormode and Firmani's 2013 paper, "On Unifying the Space of L0-Sampling 
+    Algorithms"
 
     N refers to the size of the input space (e.g. an unsigned 64-bit int in the
-    case of the ak_user_id)
+    case of most cookie ID spaces)
 
     k refers to the number of hash functions used in the s-sparse recovery data
     structure.
@@ -143,7 +150,7 @@ class L0Sampler(object):
     computation. On the other hand, by selecting bigger values for both s and 
     k, the process becomes slower than the FIS variant."
     """
-    def __init__(self, size, sparsity, k=None):
+    def __init__(self, size, sparsity, k=None, hash_function = murmurhash3_32):
         if not k:
             delta = 2 ** (-sparsity/ 12)
             k = int(round(math.log(sparsity/delta, 2)))
@@ -151,15 +158,15 @@ class L0Sampler(object):
         self.sparsity = sparsity
         self.k = k
         levels = int(round(math.log(size, 2)))
-        self.levels = [SSparseRecoveryEstimator(self.sparsity * 2, k) 
-                for _ in range(levels)]
+        self.levels = [SSparseRecoveryEstimator(self.sparsity * 2, k, 
+            hash_function) for _ in range(levels)]
+        self.hash_function = murmurhash3_32
 
     def __repr__(self):
         return_str = []
         for depth, level in enumerate(self.levels):
             return_str.append("Level %s:" % depth)
             return_str.append(str(level))
-
         return '\n\n'.join(return_str)
 
     def recover(self, i=None):
@@ -168,23 +175,24 @@ class L0Sampler(object):
         """
         if not i:
             i = random.randint(0, self.size-1)
-        for j, level in enumerate(self.levels):
+        vector = None
+        for level in self.levels:
             if level.is_s_sparse():
-                #print >> sys.stderr, "Identified level %s as s-sparse; recovering..." % j
                 vector = level.recover(i)
                 if vector:
                     break
                 else: 
-                    #print >> sys.stderr, "Failed to recover at level %s, trying level %s" % (j, j+1)
                     continue
-        #print "\n\n" + str(self) + "\n\n"
         if vector:
-            selection = self.select(vector)
-            return selection
+            return self.select(vector)
         else:
             return None
 
-    def sample(self):
+    def recursive_selection(self):
+        """
+        Attempts to select (and delete) an item from the data structure until
+        either the data structure is empty or no more items can be recovered.
+        """
         sample = []
         while True:
             selection = self.recover()
@@ -192,23 +200,27 @@ class L0Sampler(object):
                 break
             sample.append(selection)
             self.update(selection[0], -selection[1])
-            #print "RECOVERED: %s" % str(selection)
         return sample
 
     def select(self, vector):
-        #print "A'(j): %s" % vector
-        indexes = sorted(vector, key=lambda x: mmh3.hash(str(x.iota / x.phi)))
+        """
+        Given a vector of recovered items, grabs the one with the lowest hash
+        value.
+        """
+        indexes = sorted(vector, key=lambda x: 
+                self.hash_function((str(x.iota / x.phi))))
         item = indexes[0]
         i = item.iota / item.phi
         return (i, item.phi)
 
     def update(self, i, value):
         """
-        Update the L0 sampler
+        Update the L0 sampler. This process generally aligns with the 'sample'
+        step as described in section 2 of the paper.
         """
         if not (i > 0 and i <= self.size):
             raise Exception, "Update value %s outside size %s" % (i, self.size)
         for j, level in enumerate(self.levels):
             if self.size * (2 ** -(j + 1)) >= \
-                (mmh3.hash(str(i)) % self.size) + 1:
+                (self.hash_function(str(i)) % self.size) + 1:
                 level.update(i, value)
