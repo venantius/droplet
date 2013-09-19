@@ -14,6 +14,10 @@ import random
 
 from droplet.hash_functions import murmurhash3_32
 
+#TODO: nest the sub-classes under the master class
+#TODO: Write test cases for the L0 sampler
+#TODO: Alter the way it hashes so that it hashes to one row in a level rather than all rows in a level (like HLL rather than your naive implementation)
+
 class OneSparseRecoveryEstimator():
     """
     A straightforward implementation of a one-sparse recovery estimator.

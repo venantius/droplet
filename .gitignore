@@ -1,4 +1,5 @@
 *.pyc
+*.un~
 dist
 *.egg-info
 build

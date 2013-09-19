@@ -8,14 +8,14 @@ Setup.py
 from distutils.core import setup
 
 setup(
-        name = "el_zero",
-        version = "0.3.0",
-        description = "A Straightforward L0 Sampler",
-        author = "Venantius",
-        author_email = "root@venanti.us",
-        url = "http://venanti.us",
-        packages = ["el_zero"]
-        )
+    name = "droplet",
+    version = "0.3",
+    description = "A Python library for sampling and sketching massive data streams",
+    author = "Venantius",
+    author_email = "kermode@venanti.us",
+    url = "http://venanti.us",
+    packages = ["droplet"]
+)
 
 
 
