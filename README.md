@@ -5,6 +5,8 @@ Introduction
 ------------
 Droplet is a Python library for sampling, sketching and summarizing massive data streams. More information can be found on the [wiki](https://github.com/venantius/droplet/wiki).
 
+Current status is PRE-ALPHA. Do not expect anything to work.
+
 Contents
 --------
 Samplers:
